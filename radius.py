@@ -36,6 +36,11 @@ def csv_row_get_txn_info(row):
 log = csv.DictReader( open(LOG_FILE) )
 
 class RadiusTransactions(object):
+	STATUS_OK = 0
+	STATUS_DUPLICATE = 1
+	STATUS_TIMEOUT = 2
+	STATUS_INVALID = 3
+
 	def __init__(self):
 		self.txns  = {}
 
@@ -62,35 +67,36 @@ class RadiusTransactions(object):
 		else:
 			return None
 	
-	def begin_txn(self, txn):
+	def add_request(self, txn):
 		txn['start_time'] = txn['time']
 		del txn['time']
 		self.txns[txn['server']][txn['client']][txn['port']][txn['id']] = txn
 
-	def add_request(self,txn):
+	def begin(self,txn):
 		self.init_txn_dict(txn)
 		saved_txn = self.get_txn(txn)
 		txn['requests'] = 1
 
 		if saved_txn is None:
-			self.begin_txn(txn)
+			self.add_request(txn)
+			return (self.STATUS_OK, None)
 
-		elif saved_txn['Calling-Station-Id'] != txn['Calling-Station-Id']:
-			duration = txn['time'] - saved_txn['start_time']
-			print 'Conflicting MAC address %s -> %s; (%d); client: %s %s; ORIGINAL: %d requests; %fs ago' % (txn['client'], txn['server'], txn['id'], txn['User-Name'], txn['Calling-Station-Id'],saved_txn['requests'],duration)
+		# Assume anytime there is a conflicting MAC, this represents a timeout
+		elif saved_txn['Calling-Station-Id'] != txn['Calling-Station-Id'] or txn['time'] - saved_txn['start_time'] > 30:
+			self.add_request(txn)
+			
+			return (self.STATUS_TIMEOUT, txn)
 
-
-			self.begin_txn(txn)
+		# same txn, same MAC address, within 30 seconds. This is a repeated request.
 		else:
-			duration = txn['time'] - saved_txn['start_time']
 			saved_txn['requests'] += 1
-			print 'Duplicate request %s -> %s; (%d); client: %s %s; %d requests; first request: %fs ago' % (txn['client'], txn['server'], txn['id'], txn['User-Name'], txn['Calling-Station-Id'],saved_txn['requests'],duration)
+			return (self.STATUS_DUPLICATE, saved_txn)
 
 	def finish(self,txn):
 		saved_txn = self.get_txn(txn)
 
 		if saved_txn is None:
-			return None
+			return (self.STATUS_INVALID, None)
 
 		else:
 			saved_txn['end_time'] = txn['time']
@@ -103,7 +109,7 @@ class RadiusTransactions(object):
 			pass
 
 
-		return saved_txn
+		return (self.STATUS_OK, saved_txn)
 
 	def count(self):
 		size = 0
@@ -128,11 +134,24 @@ for row in log:
 	txn = csv_row_get_txn_info(row)
 
 	if code == 'Access-Request':
-		txns.add_request(txn)
-	elif code in ['Access-Accept','Access-Reject','Access-Challenge']:
-		result = txns.finish(txn)
+		code, old_txn = txns.begin(txn)
+		
+		if code == txns.STATUS_TIMEOUT:
+			print 'TXN timeout %s -> %s; (%d); old/new: %s/%s %s/%s; %d requests; %fs ago' % (
+					old_txn['client'], old_txn['server'], old_txn['id'], old_txn['User-Name'],
+					txn['User-Name'], old_txn['Calling-Station-Id'], txn['Calling-Station-Id'],
+					old_txn['requests'],txn['time'] - old_txn['start_time']
+			)
+		elif code == txns.STATUS_DUPLICATE:
+			print 'Duplicate request %s -> %s; (%d); client: %s %s; %d requests; first: %fs ago' % (
+					txn['client'], txn['server'], txn['id'], txn['User-Name'], txn['Calling-Station-Id'],
+					old_txn['requests'],txn['time'] - old_txn['start_time']
+			)
 
-		if result is None:
+	elif code in ['Access-Accept','Access-Reject','Access-Challenge']:
+		code, result = txns.finish(txn)
+
+		if code == txns.STATUS_INVALID:
 			print "%s: invalid txn state client: %s; server: %s" % (txn['Code'],txn['client'],txn['server'])
 			continue
 
