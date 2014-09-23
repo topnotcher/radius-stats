@@ -163,6 +163,10 @@ def main(log_file, result_file):
 			print "UNHANDLED CODE"
 			exit(1)
 
+	# This is not necessarily informational as there could be requests that are
+	# too new to have a response. A better method would be to search for timed
+	# out requests at the end since at present the only timeout detection is
+	# when the RADIUS Identifier is reused.
 	print "%d unfinished requests" % (txns.count())
 
 if __name__ == '__main__':
