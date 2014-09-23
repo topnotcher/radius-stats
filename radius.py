@@ -1,9 +1,13 @@
 import csv
 
-LOG_FILE = 'radius-20140917-1445_1510.csv'
+LOG_FILE = 'radius-20140922-1150_1230.csv'
 RESULT_FILE = "result.csv"
 
 def csv_row_get_identifier(row):
+	"""
+	The (client,server,sport,dport) tuple identifies packets of a RADIUS
+	"transaction". I'm assuming the server's port is always 1812.
+	"""
 	identifier = {'client': '', 'server': '', 'port': 0, 'id' : 0}
 
 	if row['Destination Port'] == '1812': 
@@ -66,13 +70,21 @@ class RadiusTransactions(object):
 	def add_request(self,txn):
 		self.init_txn_dict(txn)
 		saved_txn = self.get_txn(txn)
-		
+		txn['requests'] = 1
+
 		if saved_txn is None:
 			self.begin_txn(txn)
 
 		elif saved_txn['Calling-Station-Id'] != txn['Calling-Station-Id']:
-			print 'Received request for conflicting MAC address'
+			duration = txn['time'] - saved_txn['start_time']
+			print 'Conflicting MAC address %s -> %s; (%d); client: %s %s; ORIGINAL: %d requests; %fs ago' % (txn['client'], txn['server'], txn['id'], txn['User-Name'], txn['Calling-Station-Id'],saved_txn['requests'],duration)
+
+
 			self.begin_txn(txn)
+		else:
+			duration = txn['time'] - saved_txn['start_time']
+			saved_txn['requests'] += 1
+			print 'Duplicate request %s -> %s; (%d); client: %s %s; %d requests; first request: %fs ago' % (txn['client'], txn['server'], txn['id'], txn['User-Name'], txn['Calling-Station-Id'],saved_txn['requests'],duration)
 
 	def finish(self,txn):
 		saved_txn = self.get_txn(txn)
