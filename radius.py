@@ -1,7 +1,6 @@
+#!/usr/bin/env python
 import csv
-
-LOG_FILE = 'radius-20140922-1150_1230.csv'
-RESULT_FILE = "result.csv"
+import argparse
 
 def csv_row_get_identifier(row):
 	"""
@@ -33,7 +32,6 @@ def csv_row_get_txn_info(row):
 
 	return txn
 
-log = csv.DictReader( open(LOG_FILE) )
 
 class RadiusTransactions(object):
 	STATUS_OK = 0
@@ -121,47 +119,58 @@ class RadiusTransactions(object):
 		return size
 					
 		
+def main(log_file, result_file):
+	txns = RadiusTransactions()
+	results = None
 
-txns = RadiusTransactions()
-results = None
+	log = csv.DictReader( open(log_file) )
 
-# server => client => port => ID
-for row in log:
-	code = row['Code']
-	if row['Protocol'] != 'RADIUS':
-		continue
-
-	txn = csv_row_get_txn_info(row)
-
-	if code == 'Access-Request':
-		code, old_txn = txns.begin(txn)
-		
-		if code == txns.STATUS_TIMEOUT:
-			print 'TXN timeout %s -> %s; (%d); old/new: %s/%s %s/%s; %d requests; %fs ago' % (
-					old_txn['client'], old_txn['server'], old_txn['id'], old_txn['User-Name'],
-					txn['User-Name'], old_txn['Calling-Station-Id'], txn['Calling-Station-Id'],
-					old_txn['requests'],txn['time'] - old_txn['start_time']
-			)
-		elif code == txns.STATUS_DUPLICATE:
-			print 'Duplicate request %s -> %s; (%d); client: %s %s; %d requests; first: %fs ago' % (
-					txn['client'], txn['server'], txn['id'], txn['User-Name'], txn['Calling-Station-Id'],
-					old_txn['requests'],txn['time'] - old_txn['start_time']
-			)
-
-	elif code in ['Access-Accept','Access-Reject','Access-Challenge']:
-		code, result = txns.finish(txn)
-
-		if code == txns.STATUS_INVALID:
-			print "%s: invalid txn state client: %s; server: %s" % (txn['Code'],txn['client'],txn['server'])
+	for row in log:
+		code = row['Code']
+		if row['Protocol'] != 'RADIUS':
 			continue
 
-		if results is None:
-			results = csv.DictWriter(open(RESULT_FILE,'wb'),result.keys())
-			results.writeheader()
+		txn = csv_row_get_txn_info(row)
 
-		results.writerow(result)
-	else:
-		print "UNHANDLED CODE"
-		exit(1)
+		if code == 'Access-Request':
+			code, old_txn = txns.begin(txn)
+			
+			if code == txns.STATUS_TIMEOUT:
+				print 'TXN timeout %s -> %s; (%d); old/new: %s/%s %s/%s; %d requests; %fs ago' % (
+						old_txn['client'], old_txn['server'], old_txn['id'], old_txn['User-Name'],
+						txn['User-Name'], old_txn['Calling-Station-Id'], txn['Calling-Station-Id'],
+						old_txn['requests'],txn['time'] - old_txn['start_time']
+				)
+			elif code == txns.STATUS_DUPLICATE:
+				print 'Duplicate request %s -> %s; (%d); client: %s %s; %d requests; first: %fs ago' % (
+						txn['client'], txn['server'], txn['id'], txn['User-Name'], txn['Calling-Station-Id'],
+						old_txn['requests'],txn['time'] - old_txn['start_time']
+				)
 
-print "%d unfinished requests" % (txns.count())
+		elif code in ['Access-Accept','Access-Reject','Access-Challenge']:
+			code, result = txns.finish(txn)
+
+			if code == txns.STATUS_INVALID:
+				print "%s: invalid txn state client: %s; server: %s" % (txn['Code'],txn['client'],txn['server'])
+				continue
+
+			if results is None:
+				results = csv.DictWriter(open(result_file,'wb'),result.keys())
+				results.writeheader()
+
+			results.writerow(result)
+		else:
+			print "UNHANDLED CODE"
+			exit(1)
+
+	print "%d unfinished requests" % (txns.count())
+
+if __name__ == '__main__':
+	parser = argparse.ArgumentParser(description='Analyze response times from a packet capture (exported as CSV in wireshark) of RADIUS authentications.')
+	parser.add_argument('input_file', type=str, help="The CSV file to read from")
+	parser.add_argument('result_file', type=str, help="A CSV file to write to.")
+	args = parser.parse_args()
+
+	main(args.input_file, args.result_file)
+
+
