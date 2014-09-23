@@ -45,7 +45,7 @@ def print_server_stats(stats):
 		upper = i*5+5;
 		print '\t %d-%d seconds: %d' % (lower,upper,stats['times'][i])
 
-	print '\t >25 seconds: %d' % (stats['times'][i])
+	print '\t >25 seconds: %d' % (stats['times'][5])
 
 
 stats = {}
